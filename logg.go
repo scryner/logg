@@ -5,6 +5,7 @@ import (
 	"fmt"
 	golog "log"
 	"errors"
+    "strings"
 )
 
 type LogLevel int
@@ -79,6 +80,27 @@ func startLoggerActor() error {
 	}
 
 	return nil
+}
+
+func LogLevelFrom(s string, defaultLevel LogLevel) (level LogLevel) {
+    s2 := strings.ToLower(s)
+
+    switch s2 {
+    case "debug":
+        level = LOG_LEVEL_DEBUG
+    case "info":
+        level = LOG_LEVEL_INFO
+    case "warn":
+        level = LOG_LEVEL_WARN
+    case "error":
+        level = LOG_LEVEL_ERROR
+    case "fatal":
+        level = LOG_LEVEL_FATAL
+    default:
+        level = defaultLevel
+    }
+
+    return
 }
 
 func NewLogger(prefix string, w io.Writer, level LogLevel) (*Logger, error) {
