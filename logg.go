@@ -1,17 +1,17 @@
 package logg
 
 import (
-	"io"
 	"fmt"
+	"io"
 	golog "log"
-	"errors"
-    "strings"
+	"os"
+	"strings"
 )
 
 type LogLevel int
 
 const (
-	_ = iota
+	_                        = iota
 	LOG_LEVEL_DEBUG LogLevel = 1 << iota
 	LOG_LEVEL_INFO
 	LOG_LEVEL_WARN
@@ -29,28 +29,26 @@ var default_log_level LogLevel
 
 func init() {
 	actor_in = make(chan *logToken, LOG_QUEUE) // when queue is full with queue size, caller would to wait sometime
+	startLoggerActor()
 
-	err := startLoggerActor() 
-
-	if err != nil {
-		panic(err)
-	}
+	default_w = os.Stderr
+	default_log_level = LOG_LEVEL_DEBUG
 }
 
 type Logger struct {
-	level LogLevel
+	level  LogLevel
 	prefix string
-	l *golog.Logger
+	l      *golog.Logger
 }
 
 type logToken struct {
-	l *golog.Logger
+	l   *golog.Logger
 	msg string
 
 	ch chan int
 }
 
-func startLoggerActor() error {
+func startLoggerActor() {
 	ready := make(chan bool)
 
 	go func(actor_in chan *logToken) {
@@ -69,71 +67,58 @@ func startLoggerActor() error {
 				ch <- 1
 			}
 		}
-	} (actor_in)
+	}(actor_in)
 
-	is_ready := <-ready
-
-	if is_ready {
-		return nil
-	} else {
-		return errors.New("logger actor does not started.")
-	}
-
-	return nil
+	<-ready
 }
 
 func LogLevelFrom(s string, defaultLevel LogLevel) (level LogLevel) {
-    s2 := strings.ToLower(s)
+	s2 := strings.ToLower(s)
 
-    switch s2 {
-    case "debug":
-        level = LOG_LEVEL_DEBUG
-    case "info":
-        level = LOG_LEVEL_INFO
-    case "warn":
-        level = LOG_LEVEL_WARN
-    case "error":
-        level = LOG_LEVEL_ERROR
-    case "fatal":
-        level = LOG_LEVEL_FATAL
-    default:
-        level = defaultLevel
-    }
+	switch s2 {
+	case "debug":
+		level = LOG_LEVEL_DEBUG
+	case "info":
+		level = LOG_LEVEL_INFO
+	case "warn":
+		level = LOG_LEVEL_WARN
+	case "error":
+		level = LOG_LEVEL_ERROR
+	case "fatal":
+		level = LOG_LEVEL_FATAL
+	default:
+		level = defaultLevel
+	}
 
-    return
+	return
 }
 
-func NewLogger(prefix string, w io.Writer, level LogLevel) (*Logger, error) {
-	if level < 1 {
-		return nil, errors.New("log level is not specified.")
+func NewLogger(prefix string, w io.Writer, allowedLogLevel LogLevel) *Logger {
+	switch allowedLogLevel {
+	case LOG_LEVEL_DEBUG, LOG_LEVEL_INFO, LOG_LEVEL_WARN, LOG_LEVEL_ERROR, LOG_LEVEL_FATAL:
+	default:
+		allowedLogLevel = LOG_LEVEL_DEBUG
 	}
 
 	logger := new(Logger)
 
-	logger.level = level
+	logger.level = allowedLogLevel
 	logger.prefix = prefix
 
 	newprefix := fmt.Sprintf("[%-10s] ", prefix)
 
-	logger.l = golog.New(w, newprefix, golog.Ldate | golog.Lmicroseconds)
+	logger.l = golog.New(w, newprefix, golog.Ldate|golog.Lmicroseconds)
 
-	return logger, nil
+	return logger
 }
 
-
-func SetDefaultLogger(w io.Writer, level LogLevel) {
-	default_log_level = level
+func SetDefaultLogger(w io.Writer, allowedLogLevel LogLevel) {
+	default_log_level = allowedLogLevel
 	default_w = w
 }
 
 func GetDefaultLogger(prefix string) (*Logger, error) {
-	logger, err := NewLogger(prefix, default_w, default_log_level)
-
-	if err != nil {
-		return nil, errors.New("SetDefaultLogger call needed first.")
-	}
-
-	return logger, nil
+	return NewLogger(prefix, default_w, default_log_level), nil
 }
 
 func newLogToken(logger *Logger, ch chan int, format string, v ...interface{}) (token *logToken) {
@@ -163,7 +148,7 @@ func (logger *Logger) _printf(level LogLevel, wait bool, format string, v ...int
 	}
 }
 
-func (logger *Logger) Printf(wait bool,format string, v ...interface{}) {
+func (logger *Logger) Printf(wait bool, format string, v ...interface{}) {
 	logger._printf(logger.level, wait, format, v...)
 }
 
@@ -199,16 +184,16 @@ func setMessagePrefix(format string, level LogLevel) string {
 	var msg_prefix string
 
 	switch level {
-		case LOG_LEVEL_DEBUG:
-			msg_prefix = `(DEBG) `
-		case LOG_LEVEL_INFO:
-			msg_prefix = `(INFO) `
-		case LOG_LEVEL_WARN:
-			msg_prefix = `(WARN) `
-		case LOG_LEVEL_ERROR:
-			msg_prefix = `(ERRO) `
-		case LOG_LEVEL_FATAL:
-			msg_prefix = `(FATL) `
+	case LOG_LEVEL_DEBUG:
+		msg_prefix = `(DEBG) `
+	case LOG_LEVEL_INFO:
+		msg_prefix = `(INFO) `
+	case LOG_LEVEL_WARN:
+		msg_prefix = `(WARN) `
+	case LOG_LEVEL_ERROR:
+		msg_prefix = `(ERRO) `
+	case LOG_LEVEL_FATAL:
+		msg_prefix = `(FATL) `
 	}
 
 	return fmt.Sprintf("%s%s", msg_prefix, format)
