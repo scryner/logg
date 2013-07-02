@@ -117,8 +117,8 @@ func SetDefaultLogger(w io.Writer, allowedLogLevel LogLevel) {
 	default_w = w
 }
 
-func GetDefaultLogger(prefix string) (*Logger, error) {
-	return NewLogger(prefix, default_w, default_log_level), nil
+func GetDefaultLogger(prefix string) *Logger {
+	return NewLogger(prefix, default_w, default_log_level)
 }
 
 func newLogToken(logger *Logger, ch chan int, format string, v ...interface{}) (token *logToken) {
