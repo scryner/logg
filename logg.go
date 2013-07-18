@@ -61,7 +61,9 @@ func startLoggerActor() {
 			msg := token.msg
 			ch := token.ch
 
-			l.Println(msg)
+			if l != nil {
+				l.Println(msg)
+			}
 
 			if ch != nil {
 				ch <- 1
@@ -146,6 +148,14 @@ func (logger *Logger) _printf(level LogLevel, wait bool, format string, v ...int
 
 		<-ch // wait to flush log
 	}
+}
+
+func Flush() {
+	ch := make(chan int)
+	token := &logToken{nil, ``, ch} // logger == nil means just time to flush
+	actor_in <- token
+
+	<-ch // wait to flush log
 }
 
 func (logger *Logger) Printf(wait bool, format string, v ...interface{}) {
