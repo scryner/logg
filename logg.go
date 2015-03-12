@@ -50,6 +50,7 @@ type logToken struct {
 
 func startLoggerActor() {
 	ready := make(chan bool)
+	replacer := strings.NewReplacer("\n", "\n\t\t")
 
 	go func(actor_in chan *logToken) {
 		ready <- true
@@ -58,7 +59,7 @@ func startLoggerActor() {
 			token := <-actor_in
 
 			l := token.l
-			msg := token.msg
+			msg := replacer.Replace(token.msg)
 			ch := token.ch
 
 			if l != nil {
