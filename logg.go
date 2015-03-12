@@ -26,8 +26,6 @@ var (
 	actor_in          chan *logToken
 	default_w         io.Writer
 	default_log_level LogLevel
-
-	newLinePrefix string
 )
 
 func init() {
@@ -111,7 +109,12 @@ func NewLogger(prefix string, w io.Writer, allowedLogLevel LogLevel) *Logger {
 	logger.level = allowedLogLevel
 	logger.prefix = prefix
 
-	newprefix := fmt.Sprintf("[%-10s] ", prefix)
+	var newprefix string
+	if prefix == "" {
+		newprefix = ""
+	} else {
+		newprefix = fmt.Sprintf("[%-10s] ", prefix)
+	}
 
 	logger.l = golog.New(w, newprefix, golog.Ldate|golog.Lmicroseconds)
 
