@@ -296,6 +296,10 @@ func (logger *Logger) refresh() error {
 	return nil
 }
 
+func (logger *Logger) getCloser() io.Closer {
+	return logger.closer
+}
+
 func Flush() {
 	ch := make(chan int)
 	token := &logToken{nil, ``, ch} // logger == nil means just time to flush
