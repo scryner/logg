@@ -1,6 +1,7 @@
 package logg
 
 import (
+	"compress/gzip"
 	"fmt"
 	"io"
 	golog "log"
@@ -40,11 +41,19 @@ type Logger struct {
 	level  LogLevel
 	prefix string
 	l      *golog.Logger
+
+	// log rotate related
+	closer   io.Closer
+	maxSize  int64
+	enableGz bool
+	filepath string
+
+	written int64
 }
 
 type logToken struct {
-	l   *golog.Logger
-	msg string
+	logger *Logger
+	msg    string
 
 	ch chan int
 }
@@ -59,12 +68,14 @@ func startLoggerActor() {
 		for {
 			token := <-actor_in
 
-			l := token.l
+			logger := token.logger
 			msg := replacer.Replace(token.msg)
 			ch := token.ch
 
-			if l != nil {
-				l.Println(msg)
+			logger.refresh()
+
+			if logger.l != nil {
+				logger.l.Println(msg)
 			}
 
 			if ch != nil {
@@ -97,9 +108,10 @@ func LogLevelFrom(s string, defaultLevel LogLevel) (level LogLevel) {
 	return
 }
 
-func NewLogger(prefix string, w io.Writer, allowedLogLevel LogLevel) *Logger {
+func newLogger(prefix string, allowedLogLevel LogLevel) *Logger {
 	switch allowedLogLevel {
-	case LOG_LEVEL_DEBUG, LOG_LEVEL_INFO, LOG_LEVEL_WARN, LOG_LEVEL_ERROR, LOG_LEVEL_FATAL:
+	case LOG_LEVEL_DEBUG, LOG_LEVEL_ERROR, LOG_LEVEL_FATAL, LOG_LEVEL_INFO, LOG_LEVEL_WARN:
+		break
 	default:
 		allowedLogLevel = LOG_LEVEL_DEBUG
 	}
@@ -107,7 +119,6 @@ func NewLogger(prefix string, w io.Writer, allowedLogLevel LogLevel) *Logger {
 	logger := new(Logger)
 
 	logger.level = allowedLogLevel
-	logger.prefix = prefix
 
 	var newprefix string
 	if prefix == "" {
@@ -116,9 +127,49 @@ func NewLogger(prefix string, w io.Writer, allowedLogLevel LogLevel) *Logger {
 		newprefix = fmt.Sprintf("[%-10s] ", prefix)
 	}
 
-	logger.l = golog.New(w, newprefix, golog.Ldate|golog.Lmicroseconds)
+	logger.prefix = newprefix
 
 	return logger
+}
+
+func NewLogger(prefix string, w io.Writer, allowedLogLevel LogLevel) *Logger {
+	logger := newLogger(prefix, allowedLogLevel)
+
+	logger.l = golog.New(w, logger.prefix, golog.Ldate|golog.Lmicroseconds)
+	logger.closer = nil
+	logger.maxSize = -1
+	logger.written = 0
+	logger.enableGz = false
+
+	return logger
+}
+
+func NewFileLogger(prefix string, filepath string, allowedLogLevel LogLevel, maxSize int64, enableGz bool) (*Logger, error) {
+	if maxSize < 0 {
+		maxSize = -1
+	}
+
+	f, err := os.OpenFile(filepath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return nil, err
+	}
+
+	fi, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+
+	logger := newLogger(prefix, allowedLogLevel)
+
+	logger.l = golog.New(f, logger.prefix, golog.Ldate|golog.Lmicroseconds)
+	logger.closer = f
+	logger.maxSize = maxSize
+	logger.written = fi.Size()
+	logger.enableGz = enableGz
+	logger.filepath = filepath
+
+	return logger, nil
 }
 
 func SetDefaultLogger(w io.Writer, allowedLogLevel LogLevel) {
@@ -133,7 +184,7 @@ func GetDefaultLogger(prefix string) *Logger {
 func newLogToken(logger *Logger, ch chan int, format string, v ...interface{}) (token *logToken) {
 	token = new(logToken)
 
-	token.l = logger.l
+	token.logger = logger
 	token.msg = fmt.Sprintf(format, v...)
 	token.ch = ch
 
@@ -155,6 +206,94 @@ func (logger *Logger) _printf(level LogLevel, wait bool, format string, v ...int
 
 		<-ch // wait to flush log
 	}
+}
+
+func (logger *Logger) refresh() error {
+	if logger.maxSize <= 0 || logger.written <= logger.maxSize {
+		return nil
+	}
+
+	// close current stream
+	if logger.closer != nil {
+		safelyDo(func() {
+			logger.closer.Close()
+		})
+	}
+
+	// find latest file
+	i := 0
+	maxI := -1
+
+	for {
+		var err error
+
+		if logger.enableGz {
+			_, err = os.Stat(fmt.Sprintf("%s.%d.gz", logger.filepath, i))
+		} else {
+			_, err = os.Stat(fmt.Sprintf("%s.%d", logger.filepath, i))
+		}
+
+		if os.IsExist(err) {
+			maxI = i
+		} else {
+			break
+		}
+
+		i += 1
+	}
+
+	for i = maxI; i >= 0; i-- {
+		var oldpath, newpath string
+
+		if logger.enableGz {
+			oldpath = fmt.Sprintf("%s.%d.gz", logger.filepath, i)
+			newpath = fmt.Sprintf("%s.%d.gz", logger.filepath, i+1)
+		} else {
+			oldpath = fmt.Sprintf("%s.%d", logger.filepath, i)
+			newpath = fmt.Sprintf("%s.%d", logger.filepath, i+1)
+		}
+
+		os.Rename(oldpath, newpath)
+	}
+
+	// rename current file to .0 file
+	os.Rename(logger.filepath, fmt.Sprintf("%s.0", logger.filepath))
+
+	// gzip if necessary
+	if logger.enableGz {
+		go func() {
+			f, err := os.Open(logger.filepath)
+			if err != nil {
+				return
+			}
+
+			defer f.Close()
+
+			w, err := os.OpenFile(fmt.Sprintf("%s.0.gz", logger.filepath), os.O_CREATE|os.O_WRONLY, 0644)
+			if err != nil {
+				return
+			}
+
+			defer w.Close()
+
+			gw := gzip.NewWriter(w)
+			defer gw.Close()
+
+			io.Copy(gw, f)
+		}()
+	}
+
+	// new open stream
+	f, err := os.OpenFile(logger.filepath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+
+	logger.l = golog.New(f, logger.prefix, golog.Ldate|golog.Lmicroseconds)
+	logger.closer = f
+	logger.written = 0
+
+	return nil
 }
 
 func Flush() {
@@ -214,4 +353,15 @@ func setMessagePrefix(format string, level LogLevel) string {
 	}
 
 	return fmt.Sprintf("%s%s", msg_prefix, format)
+}
+
+func safelyDo(fun func()) (err error) {
+	defer func() {
+		if e := recover(); e != nil {
+			err = fmt.Errorf("%v", e)
+		}
+	}()
+
+	fun()
+	return
 }
