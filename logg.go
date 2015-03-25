@@ -77,6 +77,7 @@ func startLoggerActor() {
 
 				if logger.l != nil {
 					logger.l.Println(msg)
+					logger.written += len(msg)
 				}
 			}
 
