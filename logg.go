@@ -72,10 +72,12 @@ func startLoggerActor() {
 			msg := replacer.Replace(token.msg)
 			ch := token.ch
 
-			logger.refresh()
+			if logger != nil {
+				logger.refresh()
 
-			if logger.l != nil {
-				logger.l.Println(msg)
+				if logger.l != nil {
+					logger.l.Println(msg)
+				}
 			}
 
 			if ch != nil {
