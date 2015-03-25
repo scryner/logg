@@ -236,7 +236,7 @@ func (logger *Logger) refresh() error {
 			_, err = os.Stat(fmt.Sprintf("%s.%d", logger.filepath, i))
 		}
 
-		if os.IsExist(err) {
+		if err == nil || os.IsExist(err) {
 			maxI = i
 		} else {
 			break
@@ -265,14 +265,20 @@ func (logger *Logger) refresh() error {
 	// gzip if necessary
 	if logger.enableGz {
 		go func() {
-			f, err := os.Open(logger.filepath)
+			oldpath := fmt.Sprintf("%s.0", logger.filepath)
+			newpath := fmt.Sprintf("%s.gz", oldpath)
+
+			f, err := os.Open(oldpath)
 			if err != nil {
 				return
 			}
 
-			defer f.Close()
+			defer func() {
+				f.Close()
+				os.Remove(oldpath)
+			}()
 
-			w, err := os.OpenFile(fmt.Sprintf("%s.0.gz", logger.filepath), os.O_CREATE|os.O_WRONLY, 0644)
+			w, err := os.OpenFile(newpath, os.O_CREATE|os.O_WRONLY, 0644)
 			if err != nil {
 				return
 			}
