@@ -296,7 +296,7 @@ func (logger *Logger) refresh() error {
 	return nil
 }
 
-func (logger *Logger) getCloser() io.Closer {
+func (logger *Logger) GetCloser() io.Closer {
 	return logger.closer
 }
 
